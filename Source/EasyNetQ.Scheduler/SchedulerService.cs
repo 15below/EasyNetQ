@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Transactions;
 using EasyNetQ.SystemMessages;
 using EasyNetQ.Topology;
@@ -70,19 +71,32 @@ namespace EasyNetQ.Scheduler
 
         public void OnPublishTimerTick(object state)
         {
-            if (!bus.IsConnected) return;
             try
             {
-                using(var scope = new TransactionScope())
+                var declaredExchanges = new ConcurrentDictionary<string, IExchange>();
+                Func<string, IExchange> declareExchange = exchangeName =>
+                {
+                    log.DebugWrite("Declaring exchange {0}, {1}", exchangeName, ExchangeType.Topic);
+                    return bus.Advanced.ExchangeDeclare(exchangeName, ExchangeType.Topic);
+                };
+
+                if (!bus.IsConnected)
+                {
+                    log.InfoWrite("Not connected");
+
+                    return;
+                }
+
+                using (var scope = new TransactionScope())
                 {
                     var scheduledMessages = scheduleRepository.GetPending();
                     
                     foreach (var scheduledMessage in scheduledMessages)
                     {
-                        log.DebugWrite(string.Format(
-                            "Publishing Scheduled Message with Routing Key: '{0}'", scheduledMessage.BindingKey));
+                        log.DebugWrite("Publishing Scheduled Message with Routing Key: '{0}'", scheduledMessage.BindingKey);
 
-                        var exchange = bus.Advanced.ExchangeDeclare(scheduledMessage.BindingKey, ExchangeType.Topic);
+                        var exchange = declaredExchanges.GetOrAdd(scheduledMessage.BindingKey, declareExchange);
+
                         bus.Advanced.Publish(
                             exchange, 
                             scheduledMessage.BindingKey, 
@@ -97,7 +111,7 @@ namespace EasyNetQ.Scheduler
             }
             catch (Exception exception)
             {
-                log.ErrorWrite("Error in schedule pol\r\n{0}", exception);
+                log.ErrorWrite("Error in schedule poll\r\n{0}", exception);
             }
         }
 

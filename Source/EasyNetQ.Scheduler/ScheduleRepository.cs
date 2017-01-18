@@ -19,10 +19,12 @@ namespace EasyNetQ.Scheduler
         private readonly ScheduleRepositoryConfiguration configuration;
         private readonly Func<DateTime> now;
         private readonly ISqlDialect dialect;
+        private readonly IEasyNetQLogger log;
 
-        public ScheduleRepository(ScheduleRepositoryConfiguration configuration, Func<DateTime> now)
+        public ScheduleRepository(ScheduleRepositoryConfiguration configuration, IEasyNetQLogger log, Func<DateTime> now)
         {
             this.configuration = configuration;
+            this.log = log;
             this.now = now;
             this.dialect = SqlDialectResolver.Resolve(configuration.ProviderName);
         }
@@ -77,15 +79,23 @@ namespace EasyNetQ.Scheduler
             ThreadPool.QueueUserWorkItem(state =>
                 WithStoredProcedureCommand(dialect.MarkForPurgeProcedureName, command =>
                 {
-                    var purgeDate = now().AddDays(configuration.PurgeDelayDays);
-
-                    var idParameter = AddParameter(command, dialect.IdParameterName, DbType.Int32);
-                    AddParameter(command, dialect.PurgeDateParameterName, purgeDate, DbType.DateTime);
-
-                    foreach (var scheduleMessageId in scheduleMessageIds)
+                    try
                     {
-                        idParameter.Value = scheduleMessageId;
-                        command.ExecuteNonQuery();
+
+                        var purgeDate = now().AddDays(configuration.PurgeDelayDays);
+
+                        var idParameter = AddParameter(command, dialect.IdParameterName, DbType.Int32);
+                        AddParameter(command, dialect.PurgeDateParameterName, purgeDate, DbType.DateTime);
+
+                        foreach (var scheduleMessageId in scheduleMessageIds)
+                        {
+                            idParameter.Value = scheduleMessageId;
+                            command.ExecuteNonQuery();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        log.ErrorWrite("ScheduleRepository.MarkItemsForPurge threw an exception {0}", ex);
                     }
                 })
             );
