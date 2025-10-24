@@ -1,8 +1,9 @@
 ﻿// ReSharper disable InconsistentNaming
 
-using System.Linq;
 using EasyNetQ.ConnectionString;
 using FluentAssertions;
+using System.Linq;
+using System.Security.Authentication;
 using Xunit;
 
 namespace EasyNetQ.Tests
@@ -147,6 +148,26 @@ namespace EasyNetQ.Tests
             parsed.Password.Should().Be("abc_xyz");
             parsed.Port.Should().Be(12345);
             parsed.RequestedHeartbeat.Should().Be(3);
+        }
+
+        [Fact]
+        public void Should_support_ssl()
+        {
+            const string connectionStringAlternateCasing =
+                "Host=192.168.1.1:1001,my.little.host:1002;VirtualHost=Copa;UserName=Copa;" +
+                "Password=abc_xyz;Port=12345;RequestedHeartbeat=3;sSL=true;SSLVersion=tls11;servername=my-host-com";
+
+            var parsed = new ConnectionStringParser().Parse(connectionStringAlternateCasing);
+            parsed.Hosts.First().Host.Should().Be("192.168.1.1");
+            parsed.Hosts.First().Port.Should().Be(1001);
+            parsed.VirtualHost.Should().Be("Copa");
+            parsed.UserName.Should().Be("Copa");
+            parsed.Password.Should().Be("abc_xyz");
+            parsed.Port.Should().Be(12345);
+            parsed.RequestedHeartbeat.Should().Be(3);
+            parsed.Ssl.Enabled.Should().BeTrue();
+            parsed.Ssl.Version.Should().Be(SslProtocols.Tls11);
+            parsed.Ssl.Enabled.Should().BeTrue("my-host-com");
         }
     }
 }

@@ -1,4 +1,5 @@
 ﻿using RabbitMQ.Client;
+using System.Security.Authentication;
 
 namespace EasyNetQ
 {
@@ -42,14 +43,14 @@ namespace EasyNetQ
                 }
 
                 connectionFactory.HostName = hostConfiguration.Host;
-                
-                if(connectionFactory.VirtualHost == "/")
+
+                if (connectionFactory.VirtualHost == "/")
                     connectionFactory.VirtualHost = Configuration.VirtualHost;
-                
-                if(connectionFactory.UserName == "guest")
+
+                if (connectionFactory.UserName == "guest")
                     connectionFactory.UserName = Configuration.UserName;
 
-                if(connectionFactory.Password == "guest")
+                if (connectionFactory.Password == "guest")
                     connectionFactory.Password = Configuration.Password;
 
                 if (connectionFactory.Port == -1)
@@ -59,14 +60,33 @@ namespace EasyNetQ
                     connectionFactory.Ssl = hostConfiguration.Ssl;
 
                 //Prefer SSL configurations per each host but fall back to ConnectionConfiguration's SSL configuration for backwards compatibility
-                else if (Configuration.Ssl.Enabled)
-                    connectionFactory.Ssl = Configuration.Ssl;
+                else if (connectionConfiguration.Ssl.Enabled)
+                    connectionFactory.Ssl = UpdateHostConfigurationSslOptionsWithConnectionConfiguration(connectionConfiguration, hostConfiguration);
 
                 connectionFactory.RequestedHeartbeat = Configuration.RequestedHeartbeat;
                 connectionFactory.ClientProperties = Configuration.ClientProperties;
                 connectionFactory.AuthMechanisms = Configuration.AuthMechanisms;
                 clusterHostSelectionStrategy.Add(new ConnectionFactoryInfo(connectionFactory, hostConfiguration));
             }
+        }
+
+        private static SslOption UpdateHostConfigurationSslOptionsWithConnectionConfiguration(ConnectionConfiguration configuration, HostConfiguration hostConfiguration)
+        {
+            var sslOption = new SslOption()
+            {
+                AcceptablePolicyErrors = hostConfiguration.Ssl.AcceptablePolicyErrors,
+                CertPassphrase = hostConfiguration.Ssl.CertPassphrase,
+                CertPath = hostConfiguration.Ssl.CertPath,
+                CertificateSelectionCallback = hostConfiguration.Ssl.CertificateSelectionCallback,
+                CertificateValidationCallback = hostConfiguration.Ssl.CertificateValidationCallback,
+                Certs = hostConfiguration.Ssl.Certs,
+                Enabled = true,
+                Version = hostConfiguration.Ssl.Version != SslProtocols.None ?  hostConfiguration.Ssl.Version : (configuration.Ssl.Version != SslProtocols.None ? configuration.Ssl.Version : SslProtocols.Default),
+                ServerName = !string.IsNullOrEmpty(hostConfiguration.Ssl.ServerName) ? hostConfiguration.Ssl.ServerName : (!string.IsNullOrEmpty(configuration.Ssl.ServerName) ? configuration.Ssl.ServerName : hostConfiguration.Host)
+
+            };
+
+            return sslOption;
         }
 
         public virtual IConnection CreateConnection()

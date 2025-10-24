@@ -1,9 +1,10 @@
+using EasyNetQ.Sprache;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
-using EasyNetQ.Sprache;
+using System.Security.Authentication;
 
 namespace EasyNetQ.ConnectionString
 {
@@ -19,12 +20,16 @@ namespace EasyNetQ.ConnectionString
 
         internal static readonly Parser<HostConfiguration> Host =
             from host in Parse.Char(c => c != ':' && c != ';' && c != ',', "host").Many().Text()
-            from port in Parse.Char(':').Then(_ => UShortNumber).Or(Parse.Return((ushort) 0))
-            select new HostConfiguration {Host = host, Port = port};
+            from port in Parse.Char(':').Then(_ => UShortNumber).Or(Parse.Return((ushort)0))
+            select new HostConfiguration { Host = host, Port = port };
 
         internal static readonly Parser<IEnumerable<HostConfiguration>> Hosts = Host.ListDelimitedBy(',');
 
         internal static readonly Parser<Uri> AMQP = Parse.CharExcept(';').Many().Text().Where(x => Uri.TryCreate(x, UriKind.Absolute, out _)).Select(_ => new Uri(_));
+
+        internal static readonly Parser<SslProtocols> SslVersion =
+            from version in Parse.CaseInsensitiveString("Tls11").Or(Parse.CaseInsensitiveString("Tls12")).Or(Parse.CaseInsensitiveString("Tls")).Or(Parse.CaseInsensitiveString("Ssl2")).Or(Parse.CaseInsensitiveString("Ssl3")).Text()
+            select (SslProtocols)Enum.Parse(typeof(SslProtocols), version, true);
 
         internal static readonly Parser<UpdateConfiguration> Part = new List<Parser<UpdateConfiguration>>
         {
@@ -44,11 +49,15 @@ namespace EasyNetQ.ConnectionString
             BuildKeyValueParser("platform", Text, c => c.Platform),
             BuildKeyValueParser("useBackgroundThreads", Bool, c => c.UseBackgroundThreads),
             BuildKeyValueParser("dispatcherQueueSize", IntNumber, c => c.DispatcherQueueSize),
-            BuildKeyValueParser("name", Text, c => c.Name)
+            BuildKeyValueParser("name", Text, c => c.Name),
+            BuildKeyValueParser("ssl", Bool, c => c.Ssl.Enabled),
+            BuildKeyValueParser("sslVersion", SslVersion, c => c.Ssl.Version),
+            BuildKeyValueParser("sslServerName", Text, c => c.Ssl.ServerName)
+
         }.Aggregate((a, b) => a.Or(b));
 
         internal static readonly Parser<UpdateConfiguration> AMQPAlone =
-            AMQP.Select(_ => (Func<ConnectionConfiguration, ConnectionConfiguration>) (configuration
+            AMQP.Select(_ => (Func<ConnectionConfiguration, ConnectionConfiguration>)(configuration
                 =>
             {
                 configuration.AMQPConnectionString = _;
@@ -69,13 +78,13 @@ namespace EasyNetQ.ConnectionString
         )
         {
             return from key in Parse.CaseInsensitiveString(keyName).Token()
-                from separator in Parse.Char('=')
-                from value in valueParser
-                select (Func<ConnectionConfiguration, ConnectionConfiguration>) (c =>
-                {
-                    CreateSetter(getter)(c, value);
-                    return c;
-                });
+                   from separator in Parse.Char('=')
+                   from value in valueParser
+                   select (Func<ConnectionConfiguration, ConnectionConfiguration>)(c =>
+                   {
+                       CreateSetter(getter)(c, value);
+                       return c;
+                   });
         }
 
         private static Action<ConnectionConfiguration, T> CreateSetter<T>(Expression<Func<ConnectionConfiguration, T>> getter)
@@ -104,14 +113,18 @@ namespace EasyNetQ.ConnectionString
             Preconditions.CheckNotNull(property, "getter", "Member is not a property.");
             Preconditions.CheckTrue(property.CanWrite, "getter", "Member is not a writeable property.");
 
-#if !NETFX
-            return (Action<TContaining, TProperty>) property.GetSetMethod().CreateDelegate(typeof(Action<TContaining, TProperty>));
+            var valueParameterExpr = Expression.Parameter(typeof(TProperty), "value");
+            var setMethodInfo = property.GetSetMethod() ?? throw new ArgumentOutOfRangeException(nameof(getter), "No set method.");
+            var expr = Expression.Call(memberEx.Expression, setMethodInfo, valueParameterExpr);
 
-#else
-            return (Action<TContaining, TProperty>)
-                Delegate.CreateDelegate(typeof(Action<TContaining, TProperty>),
-                    property.GetSetMethod());
-#endif
+            return Expression.Lambda<Action<TContaining, TProperty>>(expr, getter.Parameters.Single(), valueParameterExpr).Compile();
+
+            //#if !NETFX
+            //            return (Action<TContaining, TProperty>) property.GetSetMethod().CreateDelegate(typeof(Action<TContaining, TProperty>));
+
+            //#else
+            //            return (Action<TContaining, TProperty>)Delegate.CreateDelegate(typeof(Action<TContaining, TProperty>), property.GetSetMethod());
+            //#endif
         }
 
         private static IEnumerable<T> Cons<T>(this T head, IEnumerable<T> rest)

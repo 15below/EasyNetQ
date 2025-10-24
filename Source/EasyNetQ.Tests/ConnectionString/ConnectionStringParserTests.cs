@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Authentication;
 using EasyNetQ.ConnectionString;
 using FluentAssertions;
 using Xunit;
@@ -78,6 +79,33 @@ namespace EasyNetQ.Tests.ConnectionString
             connectionConfiguration.Hosts.Count().Should().Be(2);
             connectionConfiguration.Hosts.First().Host.Should().Be("local");
             connectionConfiguration.Hosts.Last().Host.Should().Be("amqphost");
+        }
+
+        [Fact]
+        public void Should_correctly_parse_connection_string_ssl()
+        {
+            var connectionConfiguration = connectionStringParser.Parse("virtualHost=Copa;username=Copa;host=192.168.1.1;password=abc_xyz;port=12345;" +
+            "requestedHeartbeat=3;prefetchcount=2;timeout=12;publisherConfirms=true;" +
+            "useBackgroundThreads=true;" +
+            "name=unit-test;" +
+            "ssl=true;" +
+            "sslVersion=tls11;" +
+            "serverName=my-host-com");
+
+            connectionConfiguration.Hosts.First().Host.Should().Be("192.168.1.1");
+            connectionConfiguration.VirtualHost.Should().Be("Copa");
+            connectionConfiguration.UserName.Should().Be("Copa");
+            connectionConfiguration.Password.Should().Be("abc_xyz");
+            connectionConfiguration.Port.Should().Be(12345);
+            connectionConfiguration.RequestedHeartbeat.Should().Be(3);
+            connectionConfiguration.PrefetchCount.Should().Be(2);
+            connectionConfiguration.Timeout.Should().Be(12);
+            connectionConfiguration.PublisherConfirms.Should().BeTrue();
+            connectionConfiguration.UseBackgroundThreads.Should().BeTrue();
+            connectionConfiguration.Name.Should().Be("unit-test");
+            connectionConfiguration.Ssl.Enabled.Should().BeTrue();
+            connectionConfiguration.Ssl.Version.Should().Be(SslProtocols.Tls11);
+            connectionConfiguration.Ssl.Enabled.Should().BeTrue("my-host-com");
         }
 
         [Fact]
